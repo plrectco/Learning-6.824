@@ -1,3 +1,9 @@
+/**
+ * File   : master.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 13.01.2019
+ */
 package mapreduce
 
 //

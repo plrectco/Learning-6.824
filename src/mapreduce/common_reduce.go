@@ -1,4 +1,17 @@
+/*
+ * File   : common_reduce.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 09.01.2019
+ */
 package mapreduce
+
+import (
+	"encoding/json"
+	"log"
+	"os"
+	"sort"
+)
 
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
@@ -44,4 +57,47 @@ func doReduce(
 	//
 	// Your code here (Part I).
 	//
+	m := make(map[string][]string)
+
+	for i := 0; i < nMap; i++ {
+		inFile := reduceName(jobName, i, reduceTask)
+		f, err := os.Open(inFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		dec := json.NewDecoder(f)
+
+		for dec.More() {
+			var kv KeyValue
+			err := dec.Decode(&kv)
+			if err != nil {
+				log.Fatal(err)
+			}
+			m[kv.Key] = append(m[kv.Key], kv.Value)
+		}
+		f.Close()
+	}
+
+	var keys []string
+	for k, _ := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	f, err := os.OpenFile(outFile, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+
+	for _, k := range keys {
+		reducedValue := reduceF(k, m[k])
+		err := enc.Encode(KeyValue{k, reducedValue})
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+
+	}
 }

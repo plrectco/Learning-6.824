@@ -1,3 +1,9 @@
+/**
+ * File   : common.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 09.01.2019
+ */
 package mapreduce
 
 import (
@@ -27,8 +33,8 @@ const (
 // KeyValue is a type used to hold the key/value pairs passed to the map and
 // reduce functions.
 type KeyValue struct {
-	Key   string
-	Value string
+	Key   string `json:,`
+	Value string `json:,`
 }
 
 // reduceName constructs the name of the intermediate file which map task

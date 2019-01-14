@@ -1,7 +1,17 @@
+/**
+ * File   : common_map.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 09.01.2019
+ */
 package mapreduce
 
 import (
+	"encoding/json"
 	"hash/fnv"
+	"io/ioutil"
+	"log"
+	"os"
 )
 
 func doMap(
@@ -53,6 +63,44 @@ func doMap(
 	//
 	// Your code here (Part I).
 	//
+	fileContent, err := ioutil.ReadFile(inFile)
+	if err != nil {
+		// something wrong
+		log.Fatal(err)
+	}
+
+	fkv := make(map[string][]KeyValue)
+	keyvalues := mapF(inFile, string(fileContent[:]))
+
+	// initialize file for each key
+	for r := 0; r < nReduce; r++ {
+		outFile := reduceName(jobName, mapTask, r)
+		fkv[outFile] = []KeyValue{}
+	}
+
+	for _, kv := range keyvalues {
+		r := ihash(kv.Key) % nReduce
+		outFile := reduceName(jobName, mapTask, r)
+		fkv[outFile] = append(fkv[outFile], kv)
+
+	}
+	for k, v := range fkv {
+		f, err := os.OpenFile(k, os.O_WRONLY|os.O_CREATE, 0666)
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+		defer f.Close()
+		enc := json.NewEncoder(f)
+		for _, mkv := range v {
+			err = enc.Encode(&mkv)
+			if err != nil {
+				log.Print(err)
+				continue
+			}
+
+		}
+	}
 }
 
 func ihash(s string) int {

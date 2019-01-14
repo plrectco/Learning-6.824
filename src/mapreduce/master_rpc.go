@@ -1,3 +1,9 @@
+/**
+ * File   : master_rpc.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 13.01.2019
+ */
 package mapreduce
 
 import (
@@ -45,7 +51,7 @@ func (mr *Master) startRPCServer() {
 					conn.Close()
 				}()
 			} else {
-				debug("RegistrationServer: accept error", err)
+				// debug("RegistrationServer: accept error", err)
 				break
 			}
 		}

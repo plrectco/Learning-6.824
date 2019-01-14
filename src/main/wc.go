@@ -1,9 +1,18 @@
+/**
+ * File   : wc.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 10.01.2019
+ */
 package main
 
 import (
 	"fmt"
 	"mapreduce"
 	"os"
+	"strconv"
+	"strings"
+	"unicode"
 )
 
 //
@@ -15,6 +24,23 @@ import (
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
 	// Your code here (Part II).
+	var kvs []mapreduce.KeyValue
+	words := strings.FieldsFunc(contents, func(c rune) bool {
+		return unicode.IsPunct(c) || unicode.IsSpace(c)
+	})
+	for _, w := range words {
+		isWord := true
+		for _, r := range w {
+			if !unicode.IsLetter(r) {
+				isWord = false
+			}
+		}
+		if isWord {
+			kvs = append(kvs, mapreduce.KeyValue{w, ""})
+		}
+	}
+	return kvs
+
 }
 
 //
@@ -24,6 +50,7 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 //
 func reduceF(key string, values []string) string {
 	// Your code here (Part II).
+	return strconv.Itoa(len(values))
 }
 
 // Can be run in 3 ways:

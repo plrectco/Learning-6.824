@@ -1,3 +1,9 @@
+/**
+ * File   : test_test.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 09.01.2019
+ */
 package mapreduce
 
 import (
@@ -14,7 +20,7 @@ import (
 )
 
 const (
-	nNumber = 100000
+	nNumber = 40
 	nMap    = 20
 	nReduce = 10
 )
@@ -81,7 +87,7 @@ func check(t *testing.T, files []string) {
 		i++
 	}
 	if i != nNumber {
-		t.Fatalf("Expected %d lines in output\n", nNumber)
+		t.Fatalf("Expected %d lines in output, but get %d\n", nNumber, i)
 	}
 }
 
