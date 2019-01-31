@@ -1,3 +1,9 @@
+/**
+ * File   : config.go
+ * License: MIT
+ * Author : Xinyue Ou <xinyue3ou@gmail.com>
+ * Date   : 22.01.2019
+ */
 package raft
 
 //
@@ -320,6 +326,7 @@ func (cfg *config) checkOneLeader() int {
 		}
 
 		if len(leaders) != 0 {
+			DPrintf("leader found, %d", leaders[lastTermWithLeader][0])
 			return leaders[lastTermWithLeader][0]
 		}
 	}
