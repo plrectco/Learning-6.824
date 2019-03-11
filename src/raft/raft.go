@@ -385,11 +385,8 @@ func (rf *Raft) heartBeat() {
 					args.LeaderId = rf.me
 					args.PrevLogIndex = rf.nextIndex[peer] - 1
 					args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
-					entriesToAppend := rf.log[rf.nextIndex[peer]:]
-					args.Entries = make([]LogEntry, len(entriesToAppend))
-					// Save the temporary log state to avoid change in between the request and reply.
+					args.Entries = rf.log[rf.nextIndex[peer]:]
 					nextIndex := len(rf.log)
-					copy(args.Entries, entriesToAppend)
 					args.LeaderCommit = rf.commitIndex
 					rf.mu.Unlock()
 
@@ -594,12 +591,12 @@ func (rf *Raft) applyLogToServer() {
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 				app := ApplyMsg{
 					CommandValid: true,
-					Command:      rf.log[i].Command,
+					Command:      rf.log[i],
 					CommandIndex: i,
 				}
 				rf.applyCh <- app
+				rf.lastApplied += 1
 			}
-
 		}
 		time.Sleep(time.Duration(heartbeatrate*2) * time.Millisecond)
 	}
