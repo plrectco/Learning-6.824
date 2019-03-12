@@ -50,9 +50,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 	ck.txn++
 	arg := GetArgs{
-		Key: key,
-		Id:  ck.id,
-		Txn: ck.txn,
+		Key:      key,
+		ClientId: ck.id,
+		TxNum:    ck.txn,
 	}
 	for {
 		reply := GetReply{}
@@ -87,11 +87,11 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	ck.txn++
 	arg := PutAppendArgs{
-		Key:   key,
-		Value: value,
-		Op:    op,
-		Id:    ck.id,
-		Txn:   ck.txn,
+		Key:      key,
+		Value:    value,
+		Op:       op,
+		ClientId: ck.id,
+		TxNum:    ck.txn,
 	}
 	for {
 		// Must re-init a new reply for each try
