@@ -34,4 +34,7 @@ This field is to make sure no node can vote more than once for one specific term
 **AppendEntryReply**
 Per the possible improvement from the paper, I change the appendEntryReply structure to include a field indicating the nextIndex for the leader to append. Without such a field a leader will have to decrement the entry one by one which will cause test2CUnreliable to fail. Adding such field improves much efficiency of the system.
 
+## Issues
+Availability Issue.
+Because of intense lock use, the avalability may be an issue. There could be some requests being delayed for long.
 

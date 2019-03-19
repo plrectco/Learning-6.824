@@ -5,7 +5,6 @@ import (
 	"labrpc"
 	"math/big"
 	mrand "math/rand"
-	"sync/atomic"
 )
 
 var clientIndex uint32 = 0
@@ -15,7 +14,7 @@ type Clerk struct {
 	// You will have to modify this struct.
 	leader int    // leader index
 	txn    uint32 // transaction number, to achieve idempotent
-	id     uint32
+	id     int64
 }
 
 func nrand() int64 {
@@ -30,7 +29,8 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.leader = mrand.Int() % len(servers)
 	ck.servers = servers
 	ck.txn = 0
-	ck.id = atomic.AddUint32(&clientIndex, 1)
+	// ck.id = atomic.AddUint32(&clientIndex, 1)
+	ck.id = nrand()
 	// You'll have to add code here.
 	return ck
 }
@@ -66,7 +66,7 @@ func (ck *Clerk) Get(key string) string {
 			return ""
 		}
 		if reply.Err == OK {
-			DPrintf("%d: get %s : %s", ck.leader, arg.Key, reply.Value)
+			DPrintf("From leader %d: get %s : %s", ck.leader, arg.Key, reply.Value)
 			return reply.Value
 		}
 

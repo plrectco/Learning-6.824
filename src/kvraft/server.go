@@ -1,6 +1,7 @@
 package raftkv
 
 import (
+	"bytes"
 	"labgob"
 	"labrpc"
 	"log"
@@ -13,7 +14,8 @@ import (
 
 const Debug = 1
 const clearqueuerate int = 100
-const requesttimeout int = 1000
+const requesttimeout int = 2000
+const statecheckrate int = 50
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -29,7 +31,7 @@ type Op struct {
 	// otherwise RPC will break.
 	Operation string
 	OpId      uint32
-	ClientId  uint32
+	ClientId  int64
 	TxNum     uint32
 	ServerId  int
 	Put       PutAppendArgs
@@ -45,6 +47,11 @@ type PendingOp struct {
 //     txn     uint32
 //     success bool
 // }
+
+type KVServerPersistence struct {
+	Storage map[string]string
+	TxnDone map[int64]uint32
+}
 
 type KVServer struct {
 	mu      sync.Mutex
@@ -64,9 +71,10 @@ type KVServer struct {
 	currentIndex int
 
 	// Store completed transaction number for each client
-	txnDone map[uint32]uint32
-
+	txnDone map[int64]uint32
 	isAlive bool
+
+	persister *raft.Persister
 
 	// txnCond  *sync.Cond
 	// txnMutex sync.Mutex
@@ -82,6 +90,10 @@ func (kv *KVServer) DPrintf(format string, a ...interface{}) (n int, err error) 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	if args != nil && reply != nil {
+		if !kv.isAlive {
+			reply.WrongLeader = true
+			return
+		}
 		i := atomic.AddUint32(&kv.opid, 1)
 
 		index, term, isLeader := kv.rf.Start(Op{
@@ -113,6 +125,9 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 			case <-time.After(time.Duration(requesttimeout) * time.Millisecond):
 				ok = false
 			}
+			kv.mu.Lock()
+			delete(kv.pendingQueue, i)
+			kv.mu.Unlock()
 			kv.DPrintf("Get a commit for key %s, index %d, client %d", args.Key, index, args.ClientId)
 
 			if ok {
@@ -139,6 +154,10 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	if args != nil && reply != nil {
+		if !kv.isAlive {
+			reply.WrongLeader = true
+			return
+		}
 		i := atomic.AddUint32(&kv.opid, 1)
 		var argCopy PutAppendArgs
 		argCopy = *args
@@ -170,6 +189,9 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 			case <-time.After(time.Duration(requesttimeout) * time.Millisecond):
 				ok = false
 			}
+			kv.mu.Lock()
+			delete(kv.pendingQueue, i)
+			kv.mu.Unlock()
 			if ok {
 				reply.Err = OK
 				reply.WrongLeader = false
@@ -222,7 +244,7 @@ func (kv *KVServer) Kill() {
 // Check whether the server has seen this transaction
 // It will also update the newest transaction this server has seen.
 //
-func (kv *KVServer) checkDuplicate(clientId uint32, txn uint32) bool {
+func (kv *KVServer) checkDuplicate(clientId int64, txn uint32) bool {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	prevTxn, ok := kv.txnDone[clientId]
@@ -236,7 +258,7 @@ func (kv *KVServer) checkDuplicate(clientId uint32, txn uint32) bool {
 
 }
 
-func (kv *KVServer) updateStorage(args *PutAppendArgs, clientId uint32) {
+func (kv *KVServer) updateStorage(args *PutAppendArgs, clientId int64) {
 	// It is either the first txn for the client or a newer transaction than seen.
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -254,44 +276,85 @@ func (kv *KVServer) updateStorage(args *PutAppendArgs, clientId uint32) {
 func (kv *KVServer) commitCmd() {
 	for kv.isAlive {
 		msg := <-kv.applyCh
-		if msg.CommandValid {
-			logEntry, ok := msg.Command.(raft.LogEntry)
-			if ok {
-
-				// handling the case when the server is still catch up.
-
-				// if kv.currentIndex != msg.CommandIndex-1 {
-				//     kv.DPrintf("log index mismatch current %d committed %d", kv.currentIndex, msg.CommandIndex)
-				//     continue
-				// }
-				kv.currentIndex = msg.CommandIndex
-
-				// the commited message will always be the newest log received.
-				op, opok := logEntry.Command.(Op)
-				if opok {
-					kv.DPrintf("Processing index %d client %d txn %d", msg.CommandIndex, op.ClientId, op.TxNum)
-					// Apply to storage before return to client.
-					isDuplicate := kv.checkDuplicate(op.ClientId, op.TxNum)
-					if !isDuplicate && op.Operation == "Put" {
-						kv.DPrintf("Put with committed index %d, client %d, txn %d", msg.CommandIndex, op.ClientId, op.TxNum)
-						kv.updateStorage(&op.Put, op.ClientId)
-					}
-
-					kv.mu.Lock()
-					v, found := kv.pendingQueue[op.OpId]
-					kv.mu.Unlock()
-					if found && op.ServerId == kv.me {
-						// transfer execution to the waiting rpc handler.
-						// The rpc can then reply to the client.
-						select {
-						case v.done <- true:
-						case <-time.After(time.Duration(requesttimeout) * time.Millisecond):
-						}
-					}
-
-				}
-			}
+		kv.mu.Lock()
+		if kv.currentIndex >= msg.CommandIndex {
+			kv.mu.Unlock()
+			continue
 		}
+		kv.currentIndex = msg.CommandIndex
+		kv.mu.Unlock()
+		if msg.CommandValid {
+
+			// handling the case when the server is still catch up.
+
+			// if kv.currentIndex != msg.CommandIndex-1 {
+			//     kv.DPrintf("log index mismatch current %d committed %d", kv.currentIndex, msg.CommandIndex)
+			//     continue
+			// }
+
+			// the commited message will always be the newest log received.
+			op, opok := msg.Command.(Op)
+			if opok {
+				kv.DPrintf("Processing index %d client %d txn %d", msg.CommandIndex, op.ClientId, op.TxNum)
+				// Apply to storage before return to client.
+				isDuplicate := kv.checkDuplicate(op.ClientId, op.TxNum)
+				if !isDuplicate && op.Operation == "Put" {
+					kv.DPrintf("Put with committed index %d, client %d, txn %d", msg.CommandIndex, op.ClientId, op.TxNum)
+					kv.updateStorage(&op.Put, op.ClientId)
+				}
+
+				kv.mu.Lock()
+				v, found := kv.pendingQueue[op.OpId]
+				kv.mu.Unlock()
+				if found && op.ServerId == kv.me {
+					// transfer execution to the waiting rpc handler.
+					// The rpc can then reply to the client.
+					select {
+					case v.done <- true:
+					case <-time.After(time.Millisecond):
+					}
+				}
+
+			}
+		} else {
+			// snapshot.
+			kv.DPrintf("Get a snapshot with index %d", msg.CommandIndex)
+			kv.mu.Lock()
+			r := bytes.NewBuffer(msg.Snapshot)
+			d := labgob.NewDecoder(r)
+			persistence := KVServerPersistence{}
+			if err := d.Decode(&persistence); err != nil {
+				DPrintf("snapshot decode fails %v size %d", err, len(msg.Snapshot))
+			} else {
+				kv.storage = persistence.Storage
+				kv.txnDone = persistence.TxnDone
+				kv.DPrintf("snapshot loaded %d", msg.CommandIndex)
+			}
+
+			kv.mu.Unlock()
+
+		}
+	}
+}
+
+func (kv *KVServer) snapshot() {
+	for kv.isAlive {
+		kv.mu.Lock()
+		stateSize := kv.persister.RaftStateSize()
+		if kv.currentIndex > 0 && kv.maxraftstate > 0 && stateSize > kv.maxraftstate {
+			compactIndex := kv.currentIndex
+			w := new(bytes.Buffer)
+			e := labgob.NewEncoder(w)
+			e.Encode(KVServerPersistence{
+				Storage: kv.storage,
+				TxnDone: kv.txnDone,
+			})
+			data := w.Bytes()
+			kv.DPrintf("Encode snapshot for %d size %d", compactIndex, len(data))
+			kv.rf.CompactLog(compactIndex, data)
+		}
+		kv.mu.Unlock()
+		<-time.After(time.Duration(statecheckrate) * time.Millisecond)
 
 	}
 }
@@ -320,6 +383,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.maxraftstate = maxraftstate
+	kv.persister = persister
+	kv.currentIndex = 0
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	kv.storage = make(map[string]string)
@@ -328,11 +393,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.currentIndex = 0
 
-	kv.txnDone = make(map[uint32]uint32)
+	kv.txnDone = make(map[int64]uint32)
 
 	kv.isAlive = true
 
 	go kv.commitCmd()
+	go kv.snapshot()
 	// go kv.clearQueue()
 
 	return kv
